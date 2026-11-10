@@ -4,7 +4,7 @@ The MCP server gives your AI app four tools. The app's own model (GPT, Claude, M
 
 | Tool | What it does |
 |---|---|
-| `analyze_music_folder` | scans a folder: tags, BPM, Camelot key, energy score |
+| `analyze_music_folder` | scans a folder: reuses Serato/Rekordbox analysis and playlists, then tags, BPM, Camelot key, energy score |
 | `classify_tracks` | saves the genre / sub-genre / energy that the model chose |
 | `organize_library` | preview (`dry_run`) or run the renaming and sorting |
 | `camelot_keys` | converts keys to Camelot and lists compatible keys |
