@@ -1,6 +1,6 @@
 {
   "name": "dj-crate-digger",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Organise a DJ library: BPM, Camelot key, genre and energy, then rename and sort tracks into a pro folder structure.",
   "author": { "name": "eroldmc" },
   "repository": "https://github.com/eroldmc/dj-crate-digger",
