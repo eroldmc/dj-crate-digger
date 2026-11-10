@@ -1,0 +1,24 @@
+{
+  "version": "1.1.0",
+  "tracks": [
+    {
+      "source": "/Users/me/Downloads/Promos/01 - Artist - Night Drive.mp3",
+      "artist": "Artist",
+      "title": "Night Drive",
+      "bpm_tag": "124",
+      "key_tag": "Am",
+      "duration_s": 412,
+      "bpm_detected": 123,
+      "key_detected": "Am",
+      "key_confidence": 0.88,
+      "energy_score": 4.1,
+      "bpm": 124,
+      "bpm_source": "tag",
+      "key": "8A",
+      "key_source": "tag",
+      "genre": "House",
+      "sub_genre": "Deep House",
+      "energy": "warm_up"
+    }
+  ]
+}
