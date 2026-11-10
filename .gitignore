@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+plan.json
+dist/
+*.zip
+.DS_Store
+# test audio files
+*.mp3
+*.wav
+*.flac
+*.aiff
+*.m4a
+build/
+*.egg-info/

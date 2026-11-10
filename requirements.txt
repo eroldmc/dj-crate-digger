@@ -1,0 +1,4 @@
+mutagen>=1.47
+librosa>=0.10      # optional: BPM/key detection from audio
+soundfile>=0.12    # optional: used by librosa
+mcp>=1.2           # optional: MCP server
