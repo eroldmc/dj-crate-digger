@@ -1,6 +1,6 @@
 # 🎧 DJ Crate Digger
 
-**Your AI agent organises your DJ library like a pro.** It reads tags, detects BPM and musical key, converts keys to **Camelot**, works out the sub-genre and energy, then renames and sorts every track.
+**Your AI agent organises your DJ library like a pro.** It reuses what **Serato** and **Rekordbox** already know about your tracks, detects BPM and musical key for the rest, converts keys to **Camelot**, works out the sub-genre and energy, then renames and sorts every track.
 
 Works with **Claude, OpenAI Codex / ChatGPT, Mistral (Vibe & API), Gemini CLI, Cursor, Copilot, OpenCode, Ollama / LM Studio**. Anything that speaks [Agent Skills](https://agentskills.io), [MCP](https://modelcontextprotocol.io) or an OpenAI-compatible API can use it.
 
@@ -19,7 +19,7 @@ after:   DJ Library/01_By_Genre/House/Deep_House/124 - 8A - Artist - Night Drive
 | Agent | Role |
 |---|---|
 | 🧭 **Supervisor** | your AI runs the pipeline and shows you a preview before touching any file |
-| 🔍 **Digger** | reads tags (MP3, WAV, FLAC, AIFF, M4A, OGG); detects BPM and key from the audio when tags are missing |
+| 🔍 **Digger** | reads your **Serato** and **Rekordbox** libraries and the file tags (MP3, WAV, FLAC, AIFF, M4A, OGG); detects BPM and key from the audio only when nobody has done it yet |
 | 🎡 **Harmonic Control** | converts every key to Camelot (`Am` → `8A`, `F#m` → `11A`, Open Key `1m` → `8A`) |
 | 🎼 **Musicologist** | the LLM assigns genre, sub-genre (Deep House, Melodic Techno, Peak Time…) and energy (Warm Up → After) |
 | 🗂️ **Archivist** | renames to `BPM - Key - Artist - Title`, sorts, builds playlists, can write tags back |
@@ -44,6 +44,20 @@ DJ Library/
 ```
 
 The `.m3u8` playlists import straight into **Rekordbox, Serato, Traktor, Engine DJ and VirtualDJ**. Want French folder names? Add `--lang fr`.
+
+### Already using Serato or Rekordbox? Nothing is analysed twice
+DJ Crate Digger reads your DJ software's library first and reuses:
+- **BPM and key** from its analysis: those tracks skip audio analysis completely (much faster, and the exact values you already mix with).
+- **Your edits** (title, artist, genre, label, year, comment).
+- **Your crates and playlists**: the AI uses them as the strongest clue for genre and energy.
+
+| Software | What is read | What you do |
+|---|---|---|
+| **Serato DJ Pro / Lite** 3, 4, 5 | `_Serato_/database V2` + `Subcrates/*.crate` (in `~/Music` and at the root of your music drive) | nothing: found automatically. Quit Serato first, it updates these files when it closes |
+| **Rekordbox** 5, 6, 7 | the collection XML | **File → Export Collection in xml format**, save it in Music, Documents, Desktop or Downloads: the latest export is found automatically |
+
+When both are present, Serato's values win and Rekordbox fills the gaps. Nothing is ever written to your DJ software.
+Options: `--serato off|PATH`, `--rekordbox off|PATH`, `--force-audio`.
 
 ### Your files are safe
 - **Copy by default**: your originals stay where they are (`--move` only if you ask).
@@ -138,6 +152,9 @@ You can also skip `classify` and fill `genre`, `sub_genre` and `energy` in `plan
 | Command / option | Effect |
 |---|---|
 | `analyze --no-audio` | tags only, no audio analysis (instant) |
+| `analyze --serato off` / `--serato PATH` | ignore Serato / use a specific `_Serato_` folder (default: found automatically) |
+| `analyze --rekordbox off` / `--rekordbox PATH` | ignore Rekordbox / use a specific collection XML (default: latest export found) |
+| `analyze --force-audio` | analyse audio even for tracks Serato/Rekordbox already analysed (adds an energy score) |
 | `classify --force` | re-classify tracks that already have a genre |
 | `apply --dry-run` | show the plan, copy nothing |
 | `apply --write-tags` | write BPM + Camelot key into the organised files (MP3/FLAC/OGG) |
@@ -154,11 +171,15 @@ Energy values: `warm_up`, `building`, `peak_time`, `closing`, `after`.
 - **Key detection** (Krumhansl profiles) is reliable on tonal music, less so on very percussive techno. Check tracks marked `key_source: audio`.
 - No acoustic fingerprinting (Shazam/AcoustID) yet: a track without tags is identified from its file name.
 - Tags are written back for MP3, FLAC and OGG only.
+- Serato data is read from `database V2`, which Serato updates when you quit it: quit Serato before running an analysis.
+- Rekordbox 6/7 keep their main database encrypted, so Rekordbox data comes from your XML export: re-export it after big changes.
+- Tracks already analysed by Serato/Rekordbox get no `energy_score` unless you add `--force-audio`.
 - Web-only chat apps can't reach files on your computer. Use a desktop app (MCP), a CLI agent or the `classify` command.
 
 ## 🗺️ Roadmap
 - [ ] AcoustID identification for untagged files
-- [ ] Rekordbox XML export
+- [ ] Traktor and Engine DJ library import
+- [ ] Rekordbox XML export of the organised library
 - [ ] Automatic harmonic set builder (Camelot ±1 + rising BPM)
 
 ## 🗂️ Repository layout
