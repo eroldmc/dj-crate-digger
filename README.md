@@ -9,7 +9,6 @@ before:  Downloads/01 - Artist - Night Drive (Original Mix).mp3
 after:   DJ Library/01_By_Genre/House/Deep_House/124 - 8A - Artist - Night Drive (Original Mix).mp3
 ```
 
-[![tests](https://github.com/eroldmc/dj-crate-digger/actions/workflows/tests.yml/badge.svg)](https://github.com/eroldmc/dj-crate-digger/actions)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![python](https://img.shields.io/badge/python-3.9%2B-blue)
 
@@ -61,18 +60,18 @@ The `.m3u8` playlists import straight into **Rekordbox, Serato, Traktor, Engine 
 
 | Agent | Install |
 |---|---|
-| **Claude Code** | `/plugin marketplace add YOUR-USERNAME/dj-crate-digger` then `/plugin install dj-crate-digger@dj-crate-digger` |
-| **Claude.ai** (web/desktop) | download `dj-crate-digger.zip` from [Releases](https://github.com/YOUR-USERNAME/dj-crate-digger/releases) → *Customize > Skills > + > Upload a skill* |
+| **Claude Code** | `/plugin marketplace add eroldmc/dj-crate-digger` then `/plugin install dj-crate-digger@dj-crate-digger` |
+| **Claude.ai** (web/desktop) | download `dj-crate-digger.zip` from [Releases](https://github.com/eroldmc/dj-crate-digger/releases) → *Customize > Skills > + > Upload a skill* |
 | **OpenAI Codex** | `python3 install.py --agent agents` (installs to `~/.agents/skills`) |
 | **Mistral Vibe** | `python3 install.py --agent agents` (Vibe reads `~/.agents/skills`) |
-| **Gemini CLI** | `gemini skills install https://github.com/YOUR-USERNAME/dj-crate-digger --path skills` |
-| **Cursor, OpenCode, Cline, Windsurf, 40+ others** | `npx skills add YOUR-USERNAME/dj-crate-digger` |
+| **Gemini CLI** | `gemini skills install https://github.com/eroldmc/dj-crate-digger --path skills` |
+| **Cursor, OpenCode, Cline, Windsurf, 40+ others** | `npx skills add eroldmc/dj-crate-digger` |
 | **ChatGPT desktop, Claude Desktop, LM Studio, VS Code…** | add the MCP server, see [docs/mcp.md](docs/mcp.md) |
 | **Any LLM API** (OpenAI, Mistral, Gemini, Ollama…) | use the CLI, see [Without an agent](#-without-an-agent-any-llm-api) |
 
 ### Or the all-in-one installer
 ```bash
-git clone https://github.com/YOUR-USERNAME/dj-crate-digger.git
+git clone https://github.com/eroldmc/dj-crate-digger.git
 cd dj-crate-digger
 python3 install.py --deps        # ~/.agents/skills + ~/.claude/skills, plus Python dependencies
 ```
@@ -97,7 +96,7 @@ The agent analyses the tracks, shows you a summary table, waits for your OK, the
 For apps that use MCP tools instead of skills (ChatGPT desktop, Claude Desktop, Cursor, Codex, Gemini CLI, Mistral Vibe, LM Studio…):
 
 ```
-uvx --from git+https://github.com/YOUR-USERNAME/dj-crate-digger --with mcp --with librosa --with soundfile crate-digger-mcp
+uvx --from git+https://github.com/eroldmc/dj-crate-digger --with mcp --with librosa --with soundfile crate-digger-mcp
 ```
 
 Ready-to-paste config for each app: **[docs/mcp.md](docs/mcp.md)**.
@@ -105,7 +104,7 @@ Ready-to-paste config for each app: **[docs/mcp.md](docs/mcp.md)**.
 ## 🛠️ Without an agent (any LLM API)
 
 ```bash
-pip install "dj-crate-digger[audio] @ git+https://github.com/YOUR-USERNAME/dj-crate-digger"
+pip install "dj-crate-digger[audio] @ git+https://github.com/eroldmc/dj-crate-digger"
 
 # 1. Analyse: tags + BPM + Camelot key + energy score
 crate-digger analyze ~/Music/Promos --out plan.json
