@@ -1,0 +1,12 @@
+{
+  "name": "dj-crate-digger",
+  "description": "AI skill to organise a DJ library: BPM, Camelot key, genre, energy, renaming and sorting.",
+  "owner": { "name": "eroldmc" },
+  "plugins": [
+    {
+      "name": "dj-crate-digger",
+      "source": "./",
+      "description": "Organise a DJ library: BPM, Camelot key, genre and energy, renaming and sorting."
+    }
+  ]
+}
