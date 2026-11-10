@@ -2,6 +2,7 @@
 """DJ Crate Digger - analyse, normalise and organise a DJ music library.
 
   analyze  <source_dir> --out plan.json        tags + BPM + Camelot key + energy score
+                                               (reuses Serato / Rekordbox analysis and playlists)
   classify plan.json --provider P --model M    fill genre/sub_genre/energy with any LLM API
            (or let your AI agent fill them in plan.json itself)
   apply    plan.json --library <dir> [--dry-run] [--move] [--write-tags] [--lang en|fr]
@@ -19,7 +20,7 @@ import urllib.request
 from datetime import date
 from pathlib import Path
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 AUDIO_EXT = {".mp3", ".wav", ".flac", ".aiff", ".aif", ".m4a", ".ogg"}
 NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
@@ -193,7 +194,192 @@ def analyse_audio(path):
             "energy_score": round(max(1, min(10, score)), 1)}
 
 
-def analyze_folder(source, out="plan.json", audio=True):
+# ---------- DJ software libraries: Serato + Rekordbox ----------
+def _norm_path(p):
+    return unicodedata.normalize("NFC", str(p).replace("\\", "/")).lstrip("/").lower()
+
+
+class DJLibrary:
+    """Tracks known by a DJ app, keyed by normalised path. Serato stores paths relative to the
+    drive root and Rekordbox absolute ones: both are matched on the end of the real path."""
+
+    def __init__(self, name, tracks=None):
+        self.name = name
+        self.tracks = tracks or {}
+        self.by_name = {}
+        for rel in self.tracks:
+            self.by_name.setdefault(rel.rsplit("/", 1)[-1], []).append(rel)
+
+    def __len__(self):
+        return len(self.tracks)
+
+    def lookup(self, path):
+        full = _norm_path(Path(path).resolve())
+        for rel in self.by_name.get(full.rsplit("/", 1)[-1], []):
+            if full == rel or full.endswith("/" + rel):
+                return self.tracks[rel]
+        return None
+
+
+# Serato: _Serato_/database V2 + Subcrates/*.crate (rewritten by Serato 3, 4 and 5 on quit)
+SERATO_FIELDS = {"pfil": "path", "tsng": "title", "tart": "artist", "talb": "album", "tgen": "genre_tag",
+                 "tbpm": "bpm", "tkey": "key", "tlbl": "label", "ttyr": "year", "tcom": "comment"}
+
+
+def _serato_tlv(buf):
+    """Serato binary format: 4-byte ASCII tag, 4-byte big-endian length, payload."""
+    i = 0
+    while i + 8 <= len(buf):
+        tag = buf[i:i + 4].decode("latin-1")
+        size = int.from_bytes(buf[i + 4:i + 8], "big")
+        yield tag, buf[i + 8:i + 8 + size]
+        i += 8 + size
+
+
+def _serato_text(data):
+    return data.decode("utf-16-be", errors="replace").rstrip("\x00").strip()
+
+
+def find_serato_dirs(source):
+    """_Serato_ folders that can describe files under `source`: the home one (~/Music/_Serato_)
+    and the one at the root of the drive holding the music (external drives / USB sticks)."""
+    src = Path(source).expanduser().resolve()
+    candidates = [Path.home() / "Music" / "_Serato_"]
+    parts = src.parts
+    if len(parts) > 2 and parts[1].lower() in ("volumes", "media", "mnt"):           # macOS / Linux drives
+        candidates.append(Path(*parts[:3]) / "_Serato_")
+        if parts[1].lower() == "media" and len(parts) > 3:
+            candidates.append(Path(*parts[:4]) / "_Serato_")
+    candidates.append(Path(src.anchor) / "_Serato_")                                  # Windows drive root
+    out = []
+    for c in candidates:
+        if (c / "database V2").is_file() and c not in out:
+            out.append(c)
+    return out
+
+
+def read_serato_library(serato_dir):
+    """Parse '_Serato_/database V2' and Subcrates/*.crate -> {path: {title, ..., bpm, key, playlists}}."""
+    serato_dir = Path(serato_dir)
+    tracks = {}
+    for tag, data in _serato_tlv((serato_dir / "database V2").read_bytes()):
+        if tag != "otrk":
+            continue
+        t = {}
+        for ftag, fdata in _serato_tlv(data):
+            if ftag in SERATO_FIELDS and fdata:
+                value = _serato_text(fdata)
+                if value:
+                    t[SERATO_FIELDS[ftag]] = value
+        if t.get("path"):
+            tracks[_norm_path(t.pop("path"))] = t
+    crates_dir = serato_dir / "Subcrates"
+    if crates_dir.is_dir():
+        for crate in sorted(crates_dir.glob("*.crate")):
+            name = crate.stem.replace("%%", " / ")
+            for tag, data in _serato_tlv(crate.read_bytes()):
+                if tag != "otrk":
+                    continue
+                for ftag, fdata in _serato_tlv(data):
+                    if ftag == "ptrk":
+                        key = _norm_path(_serato_text(fdata))
+                        tracks.setdefault(key, {}).setdefault("playlists", []).append(name)
+    return tracks
+
+
+# Rekordbox: collection XML (File > Export Collection in xml format)
+REKORDBOX_FIELDS = {"Name": "title", "Artist": "artist", "Album": "album", "Genre": "genre_tag",
+                    "AverageBpm": "bpm", "Tonality": "key", "Label": "label", "Year": "year",
+                    "Comments": "comment"}
+
+
+def _rekordbox_location(uri):
+    from urllib.parse import unquote, urlparse
+    path = unquote(urlparse(uri).path) if uri.startswith("file:") else uri
+    return _norm_path(path)                                      # /C:/Users/... -> c:/users/...
+
+
+def is_rekordbox_xml(path):
+    try:
+        with open(path, "rb") as f:
+            return b"<DJ_PLAYLISTS" in f.read(4096)
+    except OSError:
+        return False
+
+
+def find_rekordbox_xml(source):
+    """Most recent Rekordbox collection export in the usual places."""
+    home = Path.home()
+    folders = [Path(source).expanduser(), home / "Music", home / "Music" / "rekordbox", home / "Documents",
+               home / "Documents" / "rekordbox", home / "Desktop", home / "Downloads"]
+    found = []
+    for d in folders:
+        if d.is_dir():
+            found += [f for f in d.glob("*.xml") if f.is_file() and is_rekordbox_xml(f)]
+    return sorted(set(found), key=lambda f: f.stat().st_mtime, reverse=True)[:1]
+
+
+def read_rekordbox_xml(xml_path):
+    """Parse a Rekordbox collection XML -> {path: {title, ..., bpm, key, playlists}}."""
+    import xml.etree.ElementTree as ET
+    root = ET.parse(xml_path).getroot()
+    tracks, by_id = {}, {}
+    collection = root.find("COLLECTION")
+    for el in (collection if collection is not None else []):
+        if el.tag != "TRACK" or not el.get("Location"):
+            continue
+        t = {}
+        for attr, field in REKORDBOX_FIELDS.items():
+            value = (el.get(attr) or "").strip()
+            if value and not (field in ("bpm", "year") and value in ("0", "0.00")):
+                t[field] = value
+        key = _rekordbox_location(el.get("Location"))
+        tracks[key] = t
+        if el.get("TrackID"):
+            by_id[el.get("TrackID")] = key
+
+    def walk(node, trail):
+        for child in node.findall("NODE"):
+            name = child.get("Name", "")
+            if child.get("Type") == "1":                           # playlist
+                label = " / ".join(trail + [name])
+                for tr in child.findall("TRACK"):
+                    ref = tr.get("Key", "")
+                    key = by_id.get(ref) if child.get("KeyType", "0") == "0" else _rekordbox_location(ref)
+                    if key in tracks:
+                        tracks[key].setdefault("playlists", []).append(label)
+            else:                                                  # folder
+                walk(child, trail + [name])
+
+    playlists = root.find("PLAYLISTS")
+    if playlists is not None:
+        for top in playlists.findall("NODE"):                      # ROOT
+            walk(top, [])
+    return tracks
+
+
+def load_libraries(source, serato="auto", rekordbox="auto"):
+    """DJ app libraries describing the tracks, in priority order (Serato first, then Rekordbox)."""
+    libs = []
+    jobs = []
+    if serato not in (None, False, "off", "none"):
+        dirs = find_serato_dirs(source) if serato == "auto" else [Path(serato).expanduser()]
+        jobs += [("serato", d, read_serato_library) for d in dirs]
+    if rekordbox not in (None, False, "off", "none"):
+        files = find_rekordbox_xml(source) if rekordbox == "auto" else [Path(rekordbox).expanduser()]
+        jobs += [("rekordbox", f, read_rekordbox_xml) for f in files]
+    for name, path, reader in jobs:
+        try:
+            lib = DJLibrary(name, reader(path))
+            log(f"{name.capitalize()}: {len(lib)} tracks read from {path}")
+            libs.append(lib)
+        except Exception as e:
+            log(f"! {name} library not readable ({path}): {e}")
+    return libs
+
+
+def analyze_folder(source, out="plan.json", audio=True, serato="auto", rekordbox="auto",
+                   force_audio=False):
     src = Path(source).expanduser()
     if not src.is_dir():
         raise FileNotFoundError(f"Not a folder: {src}")
@@ -203,11 +389,30 @@ def analyze_folder(source, out="plan.json", audio=True):
         if importlib.util.find_spec("librosa") is None:
             log("! librosa not installed: tags only (pip install librosa soundfile)")
             audio = False
+    libs = load_libraries(src, serato, rekordbox)
     tracks = []
     for i, p in enumerate(files, 1):
         log(f"[{i}/{len(files)}] {p.name}")
         info = {"source": str(p.resolve()), **guess_from_filename(p.stem), **read_tags(p)}
-        if audio:
+        lib_bpm = lib_key = None
+        for lib in reversed(libs):                    # higher-priority libraries win
+            hit = lib.lookup(p)
+            if not hit:
+                continue
+            for k in ("title", "artist", "album", "label", "year", "genre_tag", "comment"):
+                if hit.get(k):
+                    info[k] = hit[k]                  # what the DJ sees (and edited) in the app
+            if hit.get("playlists"):
+                info[f"{lib.name}_playlists"] = hit["playlists"]
+            try:
+                b = fold_bpm(hit["bpm"].replace(",", ".")) if hit.get("bpm") else None
+            except ValueError:
+                b = None
+            if b:
+                lib_bpm = (b, lib.name)
+            if to_camelot(hit.get("key")):
+                lib_key = (to_camelot(hit["key"]), lib.name)
+        if audio and (force_audio or not (lib_bpm and lib_key)):   # already analysed: skip
             try:
                 info.update(analyse_audio(p))
             except Exception as e:
@@ -219,11 +424,15 @@ def analyze_folder(source, out="plan.json", audio=True):
                 bpm = fold_bpm(str(info["bpm_tag"]).replace(",", "."))
             except ValueError:
                 pass
-        info["bpm"] = bpm or info.get("bpm_detected")
-        info["bpm_source"] = "tag" if bpm else ("audio" if info.get("bpm_detected") else None)
+        info["bpm"] = (lib_bpm and lib_bpm[0]) or bpm or info.get("bpm_detected")
+        info["bpm_source"] = (lib_bpm[1] if lib_bpm else "tag" if bpm
+                              else "audio" if info.get("bpm_detected") else None)
         cam = to_camelot(info.get("key_tag"))
-        info["key"] = cam or to_camelot(info.get("key_detected"))
-        info["key_source"] = "tag" if cam else ("audio" if info.get("key_detected") else None)
+        info["key"] = (lib_key and lib_key[0]) or cam or to_camelot(info.get("key_detected"))
+        info["key_source"] = (lib_key[1] if lib_key else "tag" if cam
+                              else "audio" if info.get("key_detected") else None)
+        if lib_key and cam and lib_key[0] != cam:
+            warnings.append(f"key {lib_key[1]} {lib_key[0]} vs tag {cam}")
         if info.get("bpm_detected") and bpm and abs(info["bpm_detected"] - bpm) > 2:
             warnings.append(f"BPM tag {bpm} vs audio {info['bpm_detected']}")
         if info.get("key_detected") and cam and to_camelot(info["key_detected"]) != cam:
@@ -258,7 +467,8 @@ CLASSIFY_PROMPT = """You are an expert DJ and music librarian. For each track, c
 - "genre": one of {genres}
 - "sub_genre": a precise sub-genre (examples: {examples})
 - "energy": one of {levels}
-Clues, most reliable first: genre_tag, artist/label/title you know, bpm, energy_score (1-10), key.
+Clues, most reliable first: serato_playlists / rekordbox_playlists (the DJ's own crates and playlists),
+genre_tag, artist/label/title you know, bpm, energy_score (1-10), key.
 Reference BPM: House 118-126, Tech House 124-128, Melodic Techno 120-126, Peak Time Techno 128-135,
 Hard Techno 140+, DnB 170-175. Energy: score<4 or bpm<120 -> warm_up; 4-6 -> building;
 >6.5 and bpm>=126 -> peak_time; emotional/melodic end-of-set -> closing; slow/hypnotic -> after.
@@ -299,7 +509,8 @@ def classify_plan(plan_path, provider=None, model=None, base_url=None, api_key=N
     api_key = api_key or (os.environ.get(key_env) if key_env else None) or os.environ.get("LLM_API_KEY")
     plan = json.loads(Path(plan_path).read_text(encoding="utf-8"))
     todo = [i for i, t in enumerate(plan["tracks"]) if force or not t.get("genre")]
-    keep = ("artist", "title", "album", "label", "year", "genre_tag", "bpm", "key", "energy_score")
+    keep = ("artist", "title", "album", "label", "year", "genre_tag", "serato_playlists", "rekordbox_playlists",
+            "comment", "bpm", "key", "energy_score")
     system = CLASSIFY_PROMPT.format(
         genres=", ".join(list(GENRES) + ["To_Sort"]),
         examples=", ".join(s for subs in GENRES.values() for s in subs[:3]),
@@ -443,6 +654,13 @@ def main(argv=None):
     a.add_argument("source")
     a.add_argument("--out", default="plan.json")
     a.add_argument("--no-audio", action="store_true", help="tags only, no audio analysis")
+    a.add_argument("--serato", default="auto",
+                   help="reuse Serato analysis: auto (default), off, or the path of a _Serato_ folder")
+    a.add_argument("--rekordbox", default="auto",
+                   help="reuse Rekordbox analysis: auto (default, finds your latest collection XML export), "
+                        "off, or the path of the XML")
+    a.add_argument("--force-audio", action="store_true",
+                   help="analyse audio even for tracks Serato/Rekordbox already analysed")
     c = sub.add_parser("classify", help="fill genre/sub_genre/energy with an LLM API")
     c.add_argument("plan")
     c.add_argument("--provider", choices=list(PROVIDERS))
@@ -463,7 +681,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     if args.cmd == "analyze":
-        analyze_folder(args.source, args.out, audio=not args.no_audio)
+        analyze_folder(args.source, args.out, audio=not args.no_audio, serato=args.serato,
+                       rekordbox=args.rekordbox, force_audio=args.force_audio)
     elif args.cmd == "classify":
         print(json.dumps(classify_plan(args.plan, args.provider, args.model, args.base_url,
                                        args.api_key, args.batch, args.force)))
