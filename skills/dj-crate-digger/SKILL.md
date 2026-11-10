@@ -2,7 +2,7 @@
 name: dj-crate-digger
 description: Organise a DJ music library (MP3/WAV/FLAC/AIFF/M4A) - detect BPM and Camelot key, classify genre and energy, rename and sort tracks into a pro folder structure.
 license: MIT
-compatibility: Needs Python 3.9+, local file access and a shell. ffmpeg required for MP3/M4A analysis.
+compatibility: Needs Python 3.10+, local file access and a shell. ffmpeg required for MP3/M4A analysis.
 ---
 
 # DJ Crate Digger
