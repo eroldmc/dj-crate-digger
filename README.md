@@ -9,7 +9,7 @@ before:  Downloads/01 - Artist - Night Drive (Original Mix).mp3
 after:   DJ Library/01_By_Genre/House/Deep_House/124 - 8A - Artist - Night Drive (Original Mix).mp3
 ```
 
-[![tests](https://github.com/YOUR-USERNAME/dj-crate-digger/actions/workflows/tests.yml/badge.svg)](https://github.com/YOUR-USERNAME/dj-crate-digger/actions)
+[![tests](https://github.com/eroldmc/dj-crate-digger/actions/workflows/tests.yml/badge.svg)](https://github.com/eroldmc/dj-crate-digger/actions)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![python](https://img.shields.io/badge/python-3.9%2B-blue)
 
