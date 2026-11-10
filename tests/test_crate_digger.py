@@ -165,3 +165,144 @@ def test_installer(tmp_path):
     subprocess.run([sys.executable, str(ROOT / "install.py"), "--uninstall"], env=env, check=True,
                    capture_output=True)
     assert not (tmp_path / ".agents/skills/dj-crate-digger").exists()
+
+
+# ---------- Serato ----------
+def _tlv(tag, payload):
+    return tag.encode("latin-1") + len(payload).to_bytes(4, "big") + payload
+
+
+def _txt(s):
+    return s.encode("utf-16-be")
+
+
+def make_serato(serato_dir, tracks, crates=None):
+    """Write a minimal '_Serato_/database V2' (+ crates) in Serato's binary format."""
+    serato_dir.mkdir(parents=True, exist_ok=True)
+    db = _tlv("vrsn", _txt("2.0/Serato Scratch LIVE Database"))
+    for t in tracks:
+        fields = b"".join(_tlv(k, _txt(v)) for k, v in t.items())
+        db += _tlv("otrk", fields + _tlv("bmis", b"\x00") + _tlv("uadd", (1700000000).to_bytes(4, "big")))
+    (serato_dir / "database V2").write_bytes(db)
+    for name, paths in (crates or {}).items():
+        (serato_dir / "Subcrates").mkdir(exist_ok=True)
+        data = _tlv("vrsn", _txt("1.0/Serato ScratchLive Crate"))
+        data += b"".join(_tlv("otrk", _tlv("ptrk", _txt(p))) for p in paths)
+        (serato_dir / "Subcrates" / f"{name}.crate").write_bytes(data)
+
+
+def test_read_serato_library(tmp_path):
+    make_serato(tmp_path / "_Serato_",
+                [{"pfil": "Music/Promos/a.mp3", "tsng": "Flash", "tart": "Joey", "tbpm": "126.00", "tkey": "Am",
+                  "ttyr": "1990", "tlbl": "R&S"}],
+                {"Techno%%Peak": ["Music/Promos/a.mp3"]})
+    lib = cd.read_serato_library(tmp_path / "_Serato_")
+    t = lib["music/promos/a.mp3"]
+    assert (t["title"], t["artist"], t["bpm"], t["key"], t["playlists"]) == ("Flash", "Joey", "126.00", "Am",
+                                                                             ["Techno / Peak"])
+    assert (t["year"], t["label"]) == ("1990", "R&S")
+
+
+def test_analyze_uses_serato_and_skips_audio(tmp_path, monkeypatch):
+    drive = tmp_path / "USB"
+    music = drive / "Music" / "Promos"
+    music.mkdir(parents=True)
+    (music / "01 - wrong - name.mp3").write_bytes(b"")
+    (music / "unknown.mp3").write_bytes(b"")
+    make_serato(drive / "_Serato_",
+                [{"pfil": "Music/Promos/01 - wrong - name.mp3", "tsng": "Night Drive", "tart": "Real Artist",
+                  "tgen": "Deep House", "tbpm": "62", "tkey": "F#m"}],
+                {"Warm up": ["Music/Promos/01 - wrong - name.mp3"]})
+    calls = []
+    monkeypatch.setattr(cd, "analyse_audio", lambda p: calls.append(p.name) or {"bpm_detected": 120})
+    import importlib.util
+    real = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda n, *a: True if n == "librosa" else real(n, *a))
+    plan = cd.analyze_folder(music, tmp_path / "plan.json", audio=True, serato=str(drive / "_Serato_"),
+                             rekordbox="off")
+    by_name = {Path(t["source"]).name: t for t in plan["tracks"]}
+    t = by_name["01 - wrong - name.mp3"]
+    assert (t["artist"], t["title"], t["genre_tag"]) == ("Real Artist", "Night Drive", "Deep House")
+    assert (t["bpm"], t["bpm_source"], t["key"], t["key_source"]) == (124, "serato", "11A", "serato")
+    assert t["serato_playlists"] == ["Warm up"]
+    assert calls == ["unknown.mp3"]            # only the track Serato never analysed is decoded
+    plan = cd.analyze_folder(music, None, audio=True, serato="off", rekordbox="off")
+    assert len(calls) == 3
+
+
+def test_find_serato_home(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    make_serato(tmp_path / "Music" / "_Serato_", [])
+    assert cd.find_serato_dirs(tmp_path) == [tmp_path / "Music" / "_Serato_"]
+
+
+# ---------- Rekordbox ----------
+def make_rekordbox_xml(path, tracks, playlists):
+    """tracks: [(TrackID, abs_path, attrs)], playlists: {"Folder/Name": [TrackID]}"""
+    from urllib.parse import quote
+    from xml.sax.saxutils import quoteattr
+    rows = []
+    for tid, p, attrs in tracks:
+        loc = "file://localhost/" + quote(Path(p).as_posix().lstrip("/"))
+        a = " ".join(f"{k}={quoteattr(v)}" for k, v in attrs.items())
+        rows.append(f'<TRACK TrackID="{tid}" Location="{loc}" {a}/>')
+    nodes = []
+    for name, ids in playlists.items():
+        folder, pl = name.split("/")
+        inner = "".join(f'<TRACK Key="{i}"/>' for i in ids)
+        nodes.append(f'<NODE Type="0" Name="{folder}" Count="1"><NODE Name="{pl}" Type="1" KeyType="0" '
+                     f'Entries="{len(ids)}">{inner}</NODE></NODE>')
+    path.write_text('<?xml version="1.0" encoding="UTF-8"?>\n<DJ_PLAYLISTS Version="1.0.0">'
+                    '<PRODUCT Name="rekordbox" Version="7.1.0" Company="AlphaTheta"/>'
+                    f'<COLLECTION Entries="{len(rows)}">{"".join(rows)}</COLLECTION>'
+                    f'<PLAYLISTS><NODE Type="0" Name="ROOT" Count="{len(nodes)}">{"".join(nodes)}</NODE>'
+                    '</PLAYLISTS></DJ_PLAYLISTS>', encoding="utf-8")
+
+
+def test_rekordbox_xml_reused_and_skips_audio(tmp_path, monkeypatch):
+    music = tmp_path / "My Music"
+    music.mkdir()
+    a, b = music / "a & b.mp3", music / "fresh.mp3"
+    a.write_bytes(b"")
+    b.write_bytes(b"")
+    xml = tmp_path / "rekordbox.xml"
+    make_rekordbox_xml(xml, [(7, a.resolve(), {"Name": "Strings", "Artist": "Solomun", "Genre": "Melodic House",
+                                               "AverageBpm": "122.00", "Tonality": "8A", "Year": "2019",
+                                               "Comments": "great closer"})],
+                       {"Sets/Closing": [7]})
+    assert cd.is_rekordbox_xml(xml)
+    calls = []
+    monkeypatch.setattr(cd, "analyse_audio", lambda p: calls.append(p.name) or {})
+    import importlib.util
+    real = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda n, *x: True if n == "librosa" else real(n, *x))
+    plan = cd.analyze_folder(music, None, audio=True, serato="off", rekordbox=str(xml))
+    t = {Path(x["source"]).name: x for x in plan["tracks"]}["a & b.mp3"]
+    assert (t["title"], t["artist"], t["genre_tag"], t["year"], t["comment"]) == (
+        "Strings", "Solomun", "Melodic House", "2019", "great closer")
+    assert (t["bpm"], t["bpm_source"], t["key"], t["key_source"]) == (122, "rekordbox", "8A", "rekordbox")
+    assert t["rekordbox_playlists"] == ["Sets / Closing"]
+    assert calls == ["fresh.mp3"]
+
+
+def test_find_rekordbox_xml(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    (tmp_path / "Documents").mkdir()
+    (tmp_path / "Documents" / "other.xml").write_text("<rss/>")
+    make_rekordbox_xml(tmp_path / "Documents" / "collection.xml", [], {})
+    assert cd.find_rekordbox_xml(tmp_path / "nowhere") == [tmp_path / "Documents" / "collection.xml"]
+
+
+def test_serato_wins_over_rekordbox(tmp_path):
+    drive = tmp_path / "USB"
+    music = drive / "Music"
+    music.mkdir(parents=True)
+    f = music / "t.mp3"
+    f.write_bytes(b"")
+    make_serato(drive / "_Serato_", [{"pfil": "Music/t.mp3", "tbpm": "124", "tkey": "Am"}], {"Deep": ["Music/t.mp3"]})
+    xml = tmp_path / "rb.xml"
+    make_rekordbox_xml(xml, [(1, f.resolve(), {"AverageBpm": "124.00", "Tonality": "Em", "Genre": "Tech"})],
+                       {"Club/Peak": [1]})
+    t = cd.analyze_folder(music, None, audio=False, serato=str(drive / "_Serato_"), rekordbox=str(xml))["tracks"][0]
+    assert (t["key"], t["key_source"], t["genre_tag"]) == ("8A", "serato", "Tech")
+    assert (t["serato_playlists"], t["rekordbox_playlists"]) == (["Deep"], ["Club / Peak"])
