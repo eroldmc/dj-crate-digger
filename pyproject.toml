@@ -8,7 +8,7 @@ version = "1.1.0"
 description = "Organise a DJ library with any AI agent: BPM, Camelot key, genre, energy, renaming and sorting."
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 keywords = ["dj", "music", "camelot", "bpm", "rekordbox", "serato", "traktor", "mcp", "agent-skills"]
 dependencies = ["mutagen>=1.47"]
 

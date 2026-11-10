@@ -10,7 +10,7 @@ after:   DJ Library/01_By_Genre/House/Deep_House/124 - 8A - Artist - Night Drive
 ```
 
 ![license](https://img.shields.io/badge/license-MIT-blue)
-![python](https://img.shields.io/badge/python-3.9%2B-blue)
+![python](https://img.shields.io/badge/python-3.10%2B-blue)
 
 ---
 
@@ -54,7 +54,7 @@ The `.m3u8` playlists import straight into **Rekordbox, Serato, Traktor, Engine 
 
 ## 📦 Install
 
-**Requirements:** Python 3.9+ and [ffmpeg](https://ffmpeg.org/download.html) (`brew install ffmpeg` · `sudo apt install ffmpeg` · `winget install ffmpeg`).
+**Requirements:** Python 3.10+ and [ffmpeg](https://ffmpeg.org/download.html) (`brew install ffmpeg` · `sudo apt install ffmpeg` · `winget install ffmpeg`).
 
 ### Pick your agent
 
