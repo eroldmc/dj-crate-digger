@@ -1,6 +1,6 @@
 ---
 name: dj-crate-digger
-description: Organise a DJ music library (MP3/WAV/FLAC/AIFF/M4A) - detect BPM and Camelot key, classify genre and energy, rename and sort tracks into a pro folder structure.
+description: Organise a DJ music library (MP3/WAV/FLAC/AIFF/M4A) - reuse Serato/Rekordbox analysis, detect BPM and Camelot key, classify genre and energy, rename and sort tracks.
 license: MIT
 compatibility: Needs Python 3.10+, local file access and a shell. ffmpeg required for MP3/M4A analysis.
 ---
@@ -32,7 +32,14 @@ If librosa can't be installed, the script falls back to tags only.
 python3 $S analyze "<source folder>" --out plan.json
 ```
 About 3-6 s per track (90 s analysed from the middle). `--no-audio` = tags only, instant.
-Existing tags always win over audio detection; disagreements are listed in `warnings`.
+**Serato / Rekordbox users:** the script reuses their BPM, key, edited metadata and crates/playlists, and
+tracks they already analysed skip the audio analysis entirely.
+- Serato: the `_Serato_` folder is found automatically (`~/Music` and the root of the music drive). Ask the user to quit Serato first.
+- Rekordbox: needs a collection XML (Rekordbox: **File → Export Collection in xml format**). The latest export in
+  the source folder, Music, Documents, Desktop or Downloads is found automatically, or pass `--rekordbox <file.xml>`.
+  If the user uses Rekordbox and no XML is found, tell them how to export it.
+- `--serato off|PATH`, `--rekordbox off|PATH`, `--force-audio` (re-analyse anyway, gives an `energy_score`).
+Priority: Serato > Rekordbox > file tags > audio detection; disagreements are listed in `warnings`.
 Audio BPM is approximate (±3): flag tracks with `bpm_source: "audio"`.
 Tracks without tags are identified from their file name: flag them "to check".
 
@@ -42,7 +49,7 @@ For each track in `plan.json`, set:
 - `sub_genre`: precise - Deep House, Tech House, Organic House, Afro House, Melodic Techno, Peak Time, Hard Techno, Minimal, Progressive, Liquid, Nu Disco, Indie Dance...
 - `energy`: `warm_up` | `building` | `peak_time` | `closing` | `after`
 
-Clues, most reliable first: `genre_tag`, artist/label/title you actually know, `bpm`, `energy_score` (1-10), key.
+Clues, most reliable first: `serato_playlists` / `rekordbox_playlists` (the DJ's own crates and playlists), `genre_tag`, artist/label/title you actually know, `bpm`, `energy_score` (1-10), key.
 Reference BPM: House 118-126, Tech House 124-128, Melodic Techno 120-126, Peak Time Techno 128-135, Hard Techno 140+, DnB 170-175.
 Energy: score < 4 or BPM < 120 → warm_up; 4-6 → building; > 6.5 with BPM ≥ 126 → peak_time; emotional end-of-set tracks → closing; slow/hypnotic → after.
 Never invent. When unsure, use `To_Sort`. Also fix `artist`/`title` when the file name was split wrongly.
